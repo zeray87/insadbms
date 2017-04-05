@@ -995,7 +995,6 @@ _equalSelectStmt(const SelectStmt *a, const SelectStmt *b)
 	COMPARE_NODE_FIELD(withClause);
 	COMPARE_SCALAR_FIELD(op);
 	COMPARE_SCALAR_FIELD(all);
-	COMPARE_NODE_FIELD(correspondingClause);
 	COMPARE_NODE_FIELD(larg);
 	COMPARE_NODE_FIELD(rarg);
 
@@ -1009,8 +1008,6 @@ _equalSetOperationStmt(const SetOperationStmt *a, const SetOperationStmt *b)
 	COMPARE_SCALAR_FIELD(all);
 	COMPARE_NODE_FIELD(larg);
 	COMPARE_NODE_FIELD(rarg);
-	COMPARE_NODE_FIELD(correspondingColumns);
-	COMPARE_SCALAR_FIELD(hasCorrespondingBy);
 	COMPARE_NODE_FIELD(colTypes);
 	COMPARE_NODE_FIELD(colTypmods);
 	COMPARE_NODE_FIELD(colCollations);
@@ -2707,8 +2704,6 @@ _equalValue(const Value *a, const Value *b)
 			elog(ERROR, "unrecognized node type: %d", (int) a->type);
 			break;
 	}
-
-	COMPARE_LOCATION_FIELD(location);
 
 	return true;
 }

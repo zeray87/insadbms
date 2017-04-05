@@ -1284,7 +1284,6 @@ typedef struct SelectStmt
 	 */
 	List	   *distinctClause; /* NULL, list of DISTINCT ON exprs, or
 								 * lcons(NIL,NIL) for all (SELECT DISTINCT) */
-	List	   *correspondingClause;	/* CORRESPONDING BY  clauses*/
 	IntoClause *intoClause;		/* target for SELECT INTO */
 	List	   *targetList;		/* the target list (of ResTarget) */
 	List	   *fromClause;		/* the FROM clause */
@@ -1320,6 +1319,7 @@ typedef struct SelectStmt
 	bool		all;			/* ALL specified? */
 	struct SelectStmt *larg;	/* left child */
 	struct SelectStmt *rarg;	/* right child */
+	/* Eventually add fields for CORRESPONDING spec here */
 } SelectStmt;
 
 
@@ -1349,8 +1349,8 @@ typedef struct SetOperationStmt
 	bool		all;			/* ALL specified? */
 	Node	   *larg;			/* left child */
 	Node	   *rarg;			/* right child */
-	List	   *correspondingColumns;	/* list of corresponding column names */
-	bool		hasCorrespondingBy;		/* has corresponding by cluase? */
+	/* Eventually add fields for CORRESPONDING spec here */
+
 	/* Fields derived during parse analysis: */
 	List	   *colTypes;		/* OID list of output column type OIDs */
 	List	   *colTypmods;		/* integer list of output column typmods */

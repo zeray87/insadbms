@@ -2499,7 +2499,6 @@ _outSelectStmt(StringInfo str, const SelectStmt *node)
 	WRITE_NODE_FIELD(withClause);
 	WRITE_ENUM_FIELD(op, SetOperation);
 	WRITE_BOOL_FIELD(all);
-	WRITE_NODE_FIELD(correspondingClause);
 	WRITE_NODE_FIELD(larg);
 	WRITE_NODE_FIELD(rarg);
 }
@@ -2792,8 +2791,6 @@ _outSetOperationStmt(StringInfo str, const SetOperationStmt *node)
 	WRITE_BOOL_FIELD(all);
 	WRITE_NODE_FIELD(larg);
 	WRITE_NODE_FIELD(rarg);
-	WRITE_NODE_FIELD(correspondingColumns);
-	WRITE_BOOL_FIELD(hasCorrespondingBy);
 	WRITE_NODE_FIELD(colTypes);
 	WRITE_NODE_FIELD(colTypmods);
 	WRITE_NODE_FIELD(colCollations);
@@ -2962,7 +2959,6 @@ _outAExpr(StringInfo str, const A_Expr *node)
 static void
 _outValue(StringInfo str, const Value *value)
 {
-	/* NB: this isn't a complete set of fields */
 	switch (value->type)
 	{
 		case T_Integer:

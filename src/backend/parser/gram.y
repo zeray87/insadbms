@@ -158,7 +158,7 @@ static void insertSelectOptions(SelectStmt *stmt,
 								Node *limitOffset, Node *limitCount,
 								WithClause *withClause,
 								core_yyscan_t yyscanner);
-static Node *makeSetOp(SetOperation op, bool all, List *correspondingClause, Node *larg, Node *rarg);
+static Node *makeSetOp(SetOperation op, bool all, Node *larg, Node *rarg);
 static Node *doNegate(Node *n, int location);
 static void doNegateFloat(Value *v);
 static Node *makeAndExpr(Node *lexpr, Node *rexpr, int location);
@@ -573,7 +573,7 @@ static Node *makeRecursiveViewSelect(char *relname, List *aliases, Node *query);
 	CHARACTER CHARACTERISTICS CHECK CHECKPOINT CLASS CLOSE
 	CLUSTER COALESCE COLLATE COLLATION COLUMN COMMENT COMMENTS COMMIT
 	COMMITTED CONCURRENTLY CONFIGURATION CONFLICT CONNECTION CONSTRAINT
-	CONSTRAINTS CONTENT_P CONTINUE_P CONVERSION_P COPY CORRESPONDING COST CREATE
+	CONSTRAINTS CONTENT_P CONTINUE_P CONVERSION_P COPY COST CREATE
 	CROSS CSV CUBE CURRENT_P
 	CURRENT_CATALOG CURRENT_DATE CURRENT_ROLE CURRENT_SCHEMA
 	CURRENT_TIME CURRENT_TIMESTAMP CURRENT_USER CURSOR CYCLE
@@ -3330,10 +3330,7 @@ columnList:
 
 columnElem: ColId
 				{
-					Value *v = makeString($1);
-
-					v->location = @1;
-					$$ = (Node *) v;
+					$$ = (Node *) makeString($1);
 				}
 		;
 
@@ -10173,25 +10170,19 @@ simple_select:
 					n->fromClause = list_make1($2);
 					$$ = (Node *)n;
 				}
-			| select_clause UNION all_or_distinct opt_corresponding_clause select_clause
+			| select_clause UNION all_or_distinct select_clause
 				{
-					$$ = makeSetOp(SETOP_UNION, $3, $4, $1, $5);
+					$$ = makeSetOp(SETOP_UNION, $3, $1, $4);
 				}
-			| select_clause INTERSECT all_or_distinct opt_corresponding_clause select_clause
+			| select_clause INTERSECT all_or_distinct select_clause
 				{
-					$$ = makeSetOp(SETOP_INTERSECT, $3, $4, $1, $5);
+					$$ = makeSetOp(SETOP_INTERSECT, $3, $1, $4);
 				}
-			| select_clause EXCEPT all_or_distinct opt_corresponding_clause select_clause
+			| select_clause EXCEPT all_or_distinct select_clause
 				{
-					$$ = makeSetOp(SETOP_EXCEPT, $3, $4, $1, $5);
+					$$ = makeSetOp(SETOP_EXCEPT, $3, $1, $4);
 				}
 		;
-
-opt_corresponding_clause:
-			CORRESPONDING BY '(' columnList ')'	{ $$ = $4; }
-			| CORRESPONDING							{ $$ = list_make1(NIL); }
-			| /*EMPTY*/								{ $$ = NIL; }
-			;
 
 /*
  * SQL standard WITH clause looks like:
@@ -13465,6 +13456,7 @@ name_list:	name
 					{ $$ = lappend($1, makeString($3)); }
 		;
 
+
 name:		ColId									{ $$ = $1; };
 
 database_name:
@@ -13779,7 +13771,6 @@ unreserved_keyword:
 			| CONTINUE_P
 			| CONVERSION_P
 			| COPY
-			| CORRESPONDING
 			| COST
 			| CSV
 			| CUBE
@@ -14576,7 +14567,7 @@ insertSelectOptions(SelectStmt *stmt,
 }
 
 static Node *
-makeSetOp(SetOperation op, bool all, List *correspondingClause, Node *larg, Node *rarg)
+makeSetOp(SetOperation op, bool all, Node *larg, Node *rarg)
 {
 	SelectStmt *n = makeNode(SelectStmt);
 
@@ -14584,7 +14575,6 @@ makeSetOp(SetOperation op, bool all, List *correspondingClause, Node *larg, Node
 	n->all = all;
 	n->larg = (SelectStmt *) larg;
 	n->rarg = (SelectStmt *) rarg;
-	n->correspondingClause = correspondingClause;
 	return (Node *) n;
 }
 
