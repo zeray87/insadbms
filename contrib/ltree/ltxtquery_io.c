@@ -96,7 +96,7 @@ gettoken_query(QPRS_STATE *state, int32 *val, int32 *lenval, char **strval, uint
 					if (*flag)
 						ereport(ERROR,
 								(errcode(ERRCODE_SYNTAX_ERROR),
-								 errmsg("modificators syntax error")));
+								 errmsg("modifiers syntax error")));
 					*lenval += charlen;
 				}
 				else if (charlen == 1 && t_iseq(state->buf, '%'))
@@ -197,7 +197,7 @@ pushval_asis(QPRS_STATE *state, int type, char *strval, int lenval, uint16 flag)
 
 #define STACKDEPTH		32
 /*
- * make polish notaion of query
+ * make polish notation of query
  */
 static int32
 makepol(QPRS_STATE *state)
@@ -515,7 +515,7 @@ infix(INFIX *in, bool first)
 Datum
 ltxtq_out(PG_FUNCTION_ARGS)
 {
-	ltxtquery  *query = PG_GETARG_LTXTQUERY(0);
+	ltxtquery  *query = PG_GETARG_LTXTQUERY_P(0);
 	INFIX		nrm;
 
 	if (query->size == 0)

@@ -7,7 +7,7 @@
  * This is a modified version of src/backend/parser/scan.l
  *
  *
- * Portions Copyright (c) 1996-2016, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2017, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  *
@@ -19,24 +19,14 @@
 #include "postgres_fe.h"
 
 #include <ctype.h>
-#include <sys/types.h>
 #include <limits.h>
 
 #include "extern.h"
 #include "preproc.h"
-
-/*
- * Change symbol names as expected by preproc.y.  It'd be better to do this
- * with %option prefix="base_yy", but that affects some other names that
- * various files expect *not* to be prefixed with "base_".  Cleaning it up
- * is not worth the trouble right now.
- */
-#define yylex           base_yylex
-#define yylval          base_yylval
 }
 
 %{
-extern YYSTYPE yylval;
+extern YYSTYPE base_yylval;
 
 static int		xcdepth = 0;	/* depth of nesting in slash-star comments */
 static char	   *dolqstart = NULL;	/* current $foo$ quote start string */
@@ -97,6 +87,7 @@ static struct _if_value
 %option noinput
 %option noyywrap
 %option warn
+%option prefix="base_yy"
 
 %option yylineno
 
@@ -366,7 +357,7 @@ cppinclude_next		{space}*#{include_next}{space}*
 /* first a general line for all commands not starting with "i" */
 /* and then the other commands starting with "i", we have to add these
  * separately because the cppline production would match on "include" too */
-cppline			{space}*#([^i][A-Za-z]*|{if}|{ifdef}|{ifndef}|{import})((\/\*[^*/]*\*+\/)|.)*{newline}
+cppline			{space}*#([^i][A-Za-z]*|{if}|{ifdef}|{ifndef}|{import})((\/\*[^*/]*\*+\/)|.|\\{space}*{newline})*{newline}
 
 /*
  * Dollar quoted strings are totally opaque, and no escaping is done on them.
@@ -451,7 +442,7 @@ cppline			{space}*#([^i][A-Za-z]*|{if}|{ifdef}|{ifndef}|{import})((\/\*[^*/]*\*+
 					BEGIN(SQL);
 					if (literalbuf[strspn(literalbuf, "01") + 1] != '\0')
 						mmerror(PARSE_ERROR, ET_ERROR, "invalid bit string literal");
-					yylval.str = mm_strdup(literalbuf);
+					base_yylval.str = mm_strdup(literalbuf);
 					return BCONST;
 				}
 
@@ -471,7 +462,7 @@ cppline			{space}*#([^i][A-Za-z]*|{if}|{ifdef}|{ifndef}|{import})((\/\*[^*/]*\*+
 <xh>{quotefail}	{
 				yyless(1);
 				BEGIN(SQL);
-				yylval.str = mm_strdup(literalbuf);
+				base_yylval.str = mm_strdup(literalbuf);
 				return XCONST;
 			}
 
@@ -514,27 +505,27 @@ cppline			{space}*#([^i][A-Za-z]*|{if}|{ifdef}|{ifndef}|{import})((\/\*[^*/]*\*+
 <xq,xqc>{quotefail} {
 				yyless(1);
 				BEGIN(state_before);
-				yylval.str = mm_strdup(literalbuf);
+				base_yylval.str = mm_strdup(literalbuf);
 				return SCONST;
 			}
 <xe>{quotestop} |
 <xe>{quotefail} {
 				yyless(1);
 				BEGIN(state_before);
-				yylval.str = mm_strdup(literalbuf);
+				base_yylval.str = mm_strdup(literalbuf);
 				return ECONST;
 			}
 <xn>{quotestop} |
 <xn>{quotefail} {
 				yyless(1);
 				BEGIN(state_before);
-				yylval.str = mm_strdup(literalbuf);
+				base_yylval.str = mm_strdup(literalbuf);
 				return NCONST;
 			}
 <xus>{xusstop} {
 				addlit(yytext, yyleng);
 				BEGIN(state_before);
-				yylval.str = mm_strdup(literalbuf);
+				base_yylval.str = mm_strdup(literalbuf);
 				return UCONST;
 			}
 <xq,xe,xn,xus>{xqdouble}	{ addlitchar('\''); }
@@ -574,8 +565,9 @@ cppline			{space}*#([^i][A-Za-z]*|{if}|{ifdef}|{ifndef}|{import})((\/\*[^*/]*\*+
 				{
 					addlit(yytext, yyleng);
 					free(dolqstart);
+					dolqstart = NULL;
 					BEGIN(SQL);
-					yylval.str = mm_strdup(literalbuf);
+					base_yylval.str = mm_strdup(literalbuf);
 					return DOLCONST;
 				}
 				else
@@ -612,12 +604,12 @@ cppline			{space}*#([^i][A-Za-z]*|{if}|{ifdef}|{ifndef}|{import})((\/\*[^*/]*\*+
 						if (literallen == 0)
 							mmerror(PARSE_ERROR, ET_ERROR, "zero-length delimited identifier");
 						/* The backend will truncate the identifier here. We do not as it does not change the result. */
-						yylval.str = mm_strdup(literalbuf);
+						base_yylval.str = mm_strdup(literalbuf);
 						return CSTRING;
 					}
 <xdc>{xdstop}		{
 						BEGIN(state_before);
-						yylval.str = mm_strdup(literalbuf);
+						base_yylval.str = mm_strdup(literalbuf);
 						return CSTRING;
 					}
 <xui>{xuistop}		{
@@ -626,7 +618,7 @@ cppline			{space}*#([^i][A-Za-z]*|{if}|{ifdef}|{ifndef}|{import})((\/\*[^*/]*\*+
 							mmerror(PARSE_ERROR, ET_ERROR, "zero-length delimited identifier");
 						/* The backend will truncate the identifier here. We do not as it does not change the result. */
 						addlit(yytext, yyleng);
-						yylval.str = mm_strdup(literalbuf);
+						base_yylval.str = mm_strdup(literalbuf);
 						return UIDENT;
 					}
 <xd,xui>{xddouble}		{ addlitchar('"'); }
@@ -725,11 +717,11 @@ cppline			{space}*#([^i][A-Za-z]*|{if}|{ifdef}|{ifndef}|{import})((\/\*[^*/]*\*+
 								return yytext[0];
 						}
 
-						yylval.str = mm_strdup(yytext);
+						base_yylval.str = mm_strdup(yytext);
 						return Op;
 					}
 <SQL>{param}		{
-						yylval.ival = atol(yytext+1);
+						base_yylval.ival = atol(yytext+1);
 						return PARAM;
 					}
 <C,SQL>{integer}	{
@@ -746,37 +738,37 @@ cppline			{space}*#([^i][A-Za-z]*|{if}|{ifdef}|{ifndef}|{import})((\/\*[^*/]*\*+
 							)
 						{
 							errno = 0;
-							yylval.str = mm_strdup(yytext);
+							base_yylval.str = mm_strdup(yytext);
 							return FCONST;
 						}
-						yylval.ival = val;
+						base_yylval.ival = val;
 						return ICONST;
 					}
 <SQL>{ip}			{
-						yylval.str = mm_strdup(yytext);
+						base_yylval.str = mm_strdup(yytext);
 						return IP;
 				}
 <C,SQL>{decimal}	{
-						yylval.str = mm_strdup(yytext);
+						base_yylval.str = mm_strdup(yytext);
 						return FCONST;
 			}
 <C,SQL>{real}		{
-						yylval.str = mm_strdup(yytext);
+						base_yylval.str = mm_strdup(yytext);
 						return FCONST;
 			}
 <SQL>{realfail1}	{
 						yyless(yyleng-1);
-						yylval.str = mm_strdup(yytext);
+						base_yylval.str = mm_strdup(yytext);
 						return FCONST;
 					}
 <SQL>{realfail2}	{
 						yyless(yyleng-2);
-						yylval.str = mm_strdup(yytext);
+						base_yylval.str = mm_strdup(yytext);
 						return FCONST;
 					}
 <SQL>:{identifier}((("->"|\.){identifier})|(\[{array}\]))*	{
-						yylval.str = mm_strdup(yytext+1);
-						return(CVARIABLE);
+						base_yylval.str = mm_strdup(yytext+1);
+						return CVARIABLE;
 					}
 <SQL>{identifier}	{
 						const ScanKeyword  *keyword;
@@ -801,7 +793,7 @@ cppline			{space}*#([^i][A-Za-z]*|{if}|{ifdef}|{ifndef}|{import})((\/\*[^*/]*\*+
 							 * to do so; that's just another way that ecpg could get
 							 * out of step with the backend.
 							 */
-							yylval.str = mm_strdup(yytext);
+							base_yylval.str = mm_strdup(yytext);
 							return IDENT;
 						}
 					}
@@ -822,11 +814,11 @@ cppline			{space}*#([^i][A-Za-z]*|{if}|{ifdef}|{ifndef}|{import})((\/\*[^*/]*\*+
 						char* endptr;
 
 						errno = 0;
-						yylval.ival = strtoul((char *)yytext,&endptr,16);
+						base_yylval.ival = strtoul((char *)yytext,&endptr,16);
 						if (*endptr != '\0' || errno == ERANGE)
 						{
 							errno = 0;
-							yylval.str = mm_strdup(yytext);
+							base_yylval.str = mm_strdup(yytext);
 							return SCONST;
 						}
 						return ICONST;
@@ -839,8 +831,8 @@ cppline			{space}*#([^i][A-Za-z]*|{if}|{ifdef}|{ifndef}|{import})((\/\*[^*/]*\*+
 						}
 						else
 						{
-							yylval.str = mm_strdup(yytext);
-							return(CPP_LINE);
+							base_yylval.str = mm_strdup(yytext);
+							return CPP_LINE;
 						}
 					}
 <C>{cppinclude_next}		{
@@ -851,13 +843,13 @@ cppline			{space}*#([^i][A-Za-z]*|{if}|{ifdef}|{ifndef}|{import})((\/\*[^*/]*\*+
 						}
 						else
 						{
-							yylval.str = mm_strdup(yytext);
-							return(CPP_LINE);
+							base_yylval.str = mm_strdup(yytext);
+							return CPP_LINE;
 						}
 					}
 <C,SQL>{cppline}	{
-						yylval.str = mm_strdup(yytext);
-						return(CPP_LINE);
+						base_yylval.str = mm_strdup(yytext);
+						return CPP_LINE;
 					}
 <C>{identifier}		{
 						const ScanKeyword		*keyword;
@@ -881,44 +873,44 @@ cppline			{space}*#([^i][A-Za-z]*|{if}|{ifdef}|{ifndef}|{import})((\/\*[^*/]*\*+
 								return keyword->value;
 							else
 							{
-								yylval.str = mm_strdup(yytext);
+								base_yylval.str = mm_strdup(yytext);
 								return IDENT;
 							}
 						}
 					}
 <C>{xcstop}			{ mmerror(PARSE_ERROR, ET_ERROR, "nested /* ... */ comments"); }
-<C>":"				{ return(':'); }
-<C>";"				{ return(';'); }
-<C>","				{ return(','); }
-<C>"*"				{ return('*'); }
-<C>"%"				{ return('%'); }
-<C>"/"				{ return('/'); }
-<C>"+"				{ return('+'); }
-<C>"-"				{ return('-'); }
-<C>"("				{ parenths_open++; return('('); }
-<C>")"				{ parenths_open--; return(')'); }
+<C>":"				{ return ':'; }
+<C>";"				{ return ';'; }
+<C>","				{ return ','; }
+<C>"*"				{ return '*'; }
+<C>"%"				{ return '%'; }
+<C>"/"				{ return '/'; }
+<C>"+"				{ return '+'; }
+<C>"-"				{ return '-'; }
+<C>"("				{ parenths_open++; return '('; }
+<C>")"				{ parenths_open--; return ')'; }
 <C,xskip>{space}		{ ECHO; }
-<C>\{				{ return('{'); }
-<C>\}				{ return('}'); }
-<C>\[				{ return('['); }
-<C>\]				{ return(']'); }
-<C>\=				{ return('='); }
-<C>"->"				{ return(S_MEMBER); }
-<C>">>"				{ return(S_RSHIFT); }
-<C>"<<"				{ return(S_LSHIFT); }
-<C>"||"				{ return(S_OR); }
-<C>"&&"				{ return(S_AND); }
-<C>"++"				{ return(S_INC); }
-<C>"--"				{ return(S_DEC); }
-<C>"=="				{ return(S_EQUAL); }
-<C>"!="				{ return(S_NEQUAL); }
-<C>"+="				{ return(S_ADD); }
-<C>"-="				{ return(S_SUB); }
-<C>"*="				{ return(S_MUL); }
-<C>"/="				{ return(S_DIV); }
-<C>"%="				{ return(S_MOD); }
-<C>"->*"			{ return(S_MEMPOINT); }
-<C>".*"				{ return(S_DOTPOINT); }
+<C>\{				{ return '{'; }
+<C>\}				{ return '}'; }
+<C>\[				{ return '['; }
+<C>\]				{ return ']'; }
+<C>\=				{ return '='; }
+<C>"->"				{ return S_MEMBER; }
+<C>">>"				{ return S_RSHIFT; }
+<C>"<<"				{ return S_LSHIFT; }
+<C>"||"				{ return S_OR; }
+<C>"&&"				{ return S_AND; }
+<C>"++"				{ return S_INC; }
+<C>"--"				{ return S_DEC; }
+<C>"=="				{ return S_EQUAL; }
+<C>"!="				{ return S_NEQUAL; }
+<C>"+="				{ return S_ADD; }
+<C>"-="				{ return S_SUB; }
+<C>"*="				{ return S_MUL; }
+<C>"/="				{ return S_DIV; }
+<C>"%="				{ return S_MOD; }
+<C>"->*"			{ return S_MEMPOINT; }
+<C>".*"				{ return S_DOTPOINT; }
 <C>{other}			{ return S_ANYTHING; }
 <C>{exec_sql}{define}{space}*	{ BEGIN(def_ident); }
 <C>{informix_special}{define}{space}*	{
@@ -930,7 +922,7 @@ cppline			{space}*#([^i][A-Za-z]*|{if}|{ifdef}|{ifndef}|{import})((\/\*[^*/]*\*+
 						else
 						{
 							yyless(1);
-							return (S_ANYTHING);
+							return S_ANYTHING;
 						}
 					}
 <C>{exec_sql}{undef}{space}*		{ BEGIN(undef); }
@@ -943,7 +935,7 @@ cppline			{space}*#([^i][A-Za-z]*|{if}|{ifdef}|{ifndef}|{import})((\/\*[^*/]*\*+
 						else
 						{
 							yyless(1);
-							return (S_ANYTHING);
+							return S_ANYTHING;
 						}
 					}
 <undef>{identifier}{space}*";" {
@@ -992,7 +984,7 @@ cppline			{space}*#([^i][A-Za-z]*|{if}|{ifdef}|{ifndef}|{import})((\/\*[^*/]*\*+
 					  else
 					  {
 						  yyless(1);
-						  return (S_ANYTHING);
+						  return S_ANYTHING;
 					  }
 					}
 <C,xskip>{exec_sql}{ifdef}{space}*	{ ifcond = TRUE; BEGIN(xcond); }
@@ -1006,7 +998,7 @@ cppline			{space}*#([^i][A-Za-z]*|{if}|{ifdef}|{ifndef}|{import})((\/\*[^*/]*\*+
 					  else
 					  {
 						  yyless(1);
-						  return (S_ANYTHING);
+						  return S_ANYTHING;
 					  }
 					}
 <C,xskip>{exec_sql}{ifndef}{space}* { ifcond = FALSE; BEGIN(xcond); }
@@ -1020,7 +1012,7 @@ cppline			{space}*#([^i][A-Za-z]*|{if}|{ifdef}|{ifndef}|{import})((\/\*[^*/]*\*+
 					  else
 					  {
 						  yyless(1);
-						  return (S_ANYTHING);
+						  return S_ANYTHING;
 					  }
 					}
 <C,xskip>{exec_sql}{elif}{space}*	{	/* pop stack */
@@ -1051,7 +1043,7 @@ cppline			{space}*#([^i][A-Za-z]*|{if}|{ifdef}|{ifndef}|{import})((\/\*[^*/]*\*+
 					else
 					{
 						yyless(1);
-						return (S_ANYTHING);
+						return S_ANYTHING;
 					}
 				}
 
@@ -1093,7 +1085,7 @@ cppline			{space}*#([^i][A-Za-z]*|{if}|{ifdef}|{ifndef}|{import})((\/\*[^*/]*\*+
 					else
 					{
 						yyless(1);
-						return (S_ANYTHING);
+						return S_ANYTHING;
 					}
 				}
 <C,xskip>{exec_sql}{endif}{space}*";" {
@@ -1124,7 +1116,7 @@ cppline			{space}*#([^i][A-Za-z]*|{if}|{ifdef}|{ifndef}|{import})((\/\*[^*/]*\*+
 					else
 					{
 						yyless(1);
-						return (S_ANYTHING);
+						return S_ANYTHING;
 					}
 				}
 

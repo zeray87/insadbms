@@ -4,7 +4,7 @@
  *	  Support for finding the values associated with Param nodes.
  *
  *
- * Portions Copyright (c) 1996-2016, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2017, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * IDENTIFICATION
@@ -61,8 +61,8 @@ copyParamList(ParamListInfo from)
 		bool		typByVal;
 
 		/* Ignore parameters we don't need, to save cycles and space. */
-		if (retval->paramMask != NULL &&
-			!bms_is_member(i, retval->paramMask))
+		if (from->paramMask != NULL &&
+			!bms_is_member(i, from->paramMask))
 		{
 			nprm->value = (Datum) 0;
 			nprm->isnull = true;
@@ -73,7 +73,7 @@ copyParamList(ParamListInfo from)
 
 		/* give hook a chance in case parameter is dynamic */
 		if (!OidIsValid(oprm->ptype) && from->paramFetch != NULL)
-			(*from->paramFetch) (from, i + 1);
+			from->paramFetch(from, i + 1);
 
 		/* flat-copy the parameter info */
 		*nprm = *oprm;
@@ -115,12 +115,12 @@ EstimateParamListSpace(ParamListInfo paramLI)
 		{
 			/* give hook a chance in case parameter is dynamic */
 			if (!OidIsValid(prm->ptype) && paramLI->paramFetch != NULL)
-				(*paramLI->paramFetch) (paramLI, i + 1);
+				paramLI->paramFetch(paramLI, i + 1);
 			typeOid = prm->ptype;
 		}
 
 		sz = add_size(sz, sizeof(Oid)); /* space for type OID */
-		sz = add_size(sz, sizeof(uint16));		/* space for pflags */
+		sz = add_size(sz, sizeof(uint16));	/* space for pflags */
 
 		/* space for datum/isnull */
 		if (OidIsValid(typeOid))
@@ -132,7 +132,7 @@ EstimateParamListSpace(ParamListInfo paramLI)
 			typByVal = true;
 		}
 		sz = add_size(sz,
-			  datumEstimateSpace(prm->value, prm->isnull, typByVal, typLen));
+					  datumEstimateSpace(prm->value, prm->isnull, typByVal, typLen));
 	}
 
 	return sz;
@@ -184,7 +184,7 @@ SerializeParamList(ParamListInfo paramLI, char **start_address)
 		{
 			/* give hook a chance in case parameter is dynamic */
 			if (!OidIsValid(prm->ptype) && paramLI->paramFetch != NULL)
-				(*paramLI->paramFetch) (paramLI, i + 1);
+				paramLI->paramFetch(paramLI, i + 1);
 			typeOid = prm->ptype;
 		}
 

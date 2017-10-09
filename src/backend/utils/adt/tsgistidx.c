@@ -3,7 +3,7 @@
  * tsgistidx.c
  *	  GiST support functions for tsvector_ops
  *
- * Portions Copyright (c) 1996-2016, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2017, PostgreSQL Global Development Group
  *
  *
  * IDENTIFICATION
@@ -17,6 +17,7 @@
 #include "access/gist.h"
 #include "access/tuptoaster.h"
 #include "tsearch/ts_utils.h"
+#include "utils/builtins.h"
 #include "utils/pg_crc.h"
 
 
@@ -109,7 +110,7 @@ static int	outbuf_maxlen = 0;
 Datum
 gtsvectorout(PG_FUNCTION_ARGS)
 {
-	SignTSVector *key = (SignTSVector *) DatumGetPointer(PG_DETOAST_DATUM(PG_GETARG_POINTER(0)));
+	SignTSVector *key = (SignTSVector *) PG_DETOAST_DATUM(PG_GETARG_POINTER(0));
 	char	   *outbuf;
 
 	if (outbuf_maxlen == 0)
@@ -271,8 +272,12 @@ gtsvector_compress(PG_FUNCTION_ARGS)
 Datum
 gtsvector_decompress(PG_FUNCTION_ARGS)
 {
+	/*
+	 * We need to detoast the stored value, because the other gtsvector
+	 * support functions don't cope with toasted values.
+	 */
 	GISTENTRY  *entry = (GISTENTRY *) PG_GETARG_POINTER(0);
-	SignTSVector *key = (SignTSVector *) DatumGetPointer(PG_DETOAST_DATUM(entry->key));
+	SignTSVector *key = (SignTSVector *) PG_DETOAST_DATUM(entry->key);
 
 	if (key != (SignTSVector *) DatumGetPointer(entry->key))
 	{
@@ -316,14 +321,14 @@ checkcondition_arr(void *checkval, QueryOperand *val, ExecPhraseData *data)
 	{
 		StopMiddle = StopLow + (StopHigh - StopLow) / 2;
 		if (*StopMiddle == val->valcrc)
-			return (true);
+			return true;
 		else if (*StopMiddle < val->valcrc)
 			StopLow = StopMiddle + 1;
 		else
 			StopHigh = StopMiddle;
 	}
 
-	return (false);
+	return false;
 }
 
 static bool
@@ -359,12 +364,11 @@ gtsvector_consistent(PG_FUNCTION_ARGS)
 		if (ISALLTRUE(key))
 			PG_RETURN_BOOL(true);
 
-		PG_RETURN_BOOL(TS_execute(
-								  GETQUERY(query),
+		/* since signature is lossy, cannot specify CALC_NOT here */
+		PG_RETURN_BOOL(TS_execute(GETQUERY(query),
 								  (void *) GETSIGN(key),
-								  TS_EXEC_PHRASE_AS_AND,
-								  checkcondition_bit
-								  ));
+								  TS_EXEC_PHRASE_NO_POS,
+								  checkcondition_bit));
 	}
 	else
 	{							/* only leaf pages */
@@ -372,12 +376,10 @@ gtsvector_consistent(PG_FUNCTION_ARGS)
 
 		chkval.arrb = GETARR(key);
 		chkval.arre = chkval.arrb + ARRNELEM(key);
-		PG_RETURN_BOOL(TS_execute(
-								  GETQUERY(query),
+		PG_RETURN_BOOL(TS_execute(GETQUERY(query),
 								  (void *) &chkval,
-								  TS_EXEC_PHRASE_AS_AND | TS_EXEC_CALC_NOT,
-								  checkcondition_arr
-								  ));
+								  TS_EXEC_PHRASE_NO_POS | TS_EXEC_CALC_NOT,
+								  checkcondition_arr));
 	}
 }
 

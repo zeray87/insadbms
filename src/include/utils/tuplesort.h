@@ -10,7 +10,7 @@
  * amounts are sorted using temporary files and a standard external sort
  * algorithm.
  *
- * Portions Copyright (c) 1996-2016, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2017, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * src/include/utils/tuplesort.h
@@ -30,6 +30,34 @@
  * tuplesort.c.
  */
 typedef struct Tuplesortstate Tuplesortstate;
+
+/*
+ * Data structures for reporting sort statistics.  Note that
+ * TuplesortInstrumentation can't contain any pointers because we
+ * sometimes put it in shared memory.
+ */
+typedef enum
+{
+	SORT_TYPE_STILL_IN_PROGRESS = 0,
+	SORT_TYPE_TOP_N_HEAPSORT,
+	SORT_TYPE_QUICKSORT,
+	SORT_TYPE_EXTERNAL_SORT,
+	SORT_TYPE_EXTERNAL_MERGE
+} TuplesortMethod;
+
+typedef enum
+{
+	SORT_SPACE_TYPE_DISK,
+	SORT_SPACE_TYPE_MEMORY
+} TuplesortSpaceType;
+
+typedef struct TuplesortInstrumentation
+{
+	TuplesortMethod sortMethod; /* sort algorithm used */
+	TuplesortSpaceType spaceType;	/* type of space spaceUsed represents */
+	long		spaceUsed;		/* space consumption, in kB */
+} TuplesortInstrumentation;
+
 
 /*
  * We provide multiple interfaces to what is essentially the same code,
@@ -72,7 +100,9 @@ extern Tuplesortstate *tuplesort_begin_index_btree(Relation heapRel,
 							int workMem, bool randomAccess);
 extern Tuplesortstate *tuplesort_begin_index_hash(Relation heapRel,
 						   Relation indexRel,
-						   uint32 hash_mask,
+						   uint32 high_mask,
+						   uint32 low_mask,
+						   uint32 max_buckets,
 						   int workMem, bool randomAccess);
 extern Tuplesortstate *tuplesort_begin_datum(Oid datumType,
 					  Oid sortOperator, Oid sortCollation,
@@ -93,11 +123,9 @@ extern void tuplesort_putdatum(Tuplesortstate *state, Datum val,
 extern void tuplesort_performsort(Tuplesortstate *state);
 
 extern bool tuplesort_gettupleslot(Tuplesortstate *state, bool forward,
-					   TupleTableSlot *slot, Datum *abbrev);
-extern HeapTuple tuplesort_getheaptuple(Tuplesortstate *state, bool forward,
-					   bool *should_free);
-extern IndexTuple tuplesort_getindextuple(Tuplesortstate *state, bool forward,
-						bool *should_free);
+					   bool copy, TupleTableSlot *slot, Datum *abbrev);
+extern HeapTuple tuplesort_getheaptuple(Tuplesortstate *state, bool forward);
+extern IndexTuple tuplesort_getindextuple(Tuplesortstate *state, bool forward);
 extern bool tuplesort_getdatum(Tuplesortstate *state, bool forward,
 				   Datum *val, bool *isNull, Datum *abbrev);
 
@@ -107,9 +135,9 @@ extern bool tuplesort_skiptuples(Tuplesortstate *state, int64 ntuples,
 extern void tuplesort_end(Tuplesortstate *state);
 
 extern void tuplesort_get_stats(Tuplesortstate *state,
-					const char **sortMethod,
-					const char **spaceType,
-					long *spaceUsed);
+					TuplesortInstrumentation *stats);
+extern const char *tuplesort_method_name(TuplesortMethod m);
+extern const char *tuplesort_space_type_name(TuplesortSpaceType t);
 
 extern int	tuplesort_merge_order(int64 allowedMem);
 
@@ -123,4 +151,4 @@ extern void tuplesort_rescan(Tuplesortstate *state);
 extern void tuplesort_markpos(Tuplesortstate *state);
 extern void tuplesort_restorepos(Tuplesortstate *state);
 
-#endif   /* TUPLESORT_H */
+#endif							/* TUPLESORT_H */

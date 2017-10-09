@@ -72,7 +72,7 @@ vmmerror(int error_code, enum errortype type, const char *error, va_list ap)
 	/* localize the error message string */
 	error = _(error);
 
-	fprintf(stderr, "%s:%d: ", input_filename, yylineno);
+	fprintf(stderr, "%s:%d: ", input_filename, base_yylineno);
 
 	switch(type)
 	{
@@ -117,10 +117,10 @@ mmfatal(int error_code, const char *error, ...)
 	vmmerror(error_code, ET_ERROR, error, ap);
 	va_end(ap);
 
-	if (yyin)
-		fclose(yyin);
-	if (yyout)
-		fclose(yyout);
+	if (base_yyin)
+		fclose(base_yyin);
+	if (base_yyout)
+		fclose(base_yyout);
 
 	if (strcmp(output_filename, "-") != 0 && unlink(output_filename) != 0)
 		fprintf(stderr, _("could not remove output file \"%s\"\n"), output_filename);
@@ -142,7 +142,7 @@ cat2_str(char *str1, char *str2)
 	strcat(res_str, str2);
 	free(str1);
 	free(str2);
-	return(res_str);
+	return res_str;
 }
 
 static char *
@@ -162,7 +162,7 @@ cat_str(int count, ...)
 
 	va_end(args);
 
-	return(res_str);
+	return res_str;
 }
 
 static char *
@@ -174,7 +174,7 @@ make2_str(char *str1, char *str2)
 	strcat(res_str, str2);
 	free(str1);
 	free(str2);
-	return(res_str);
+	return res_str;
 }
 
 static char *
@@ -188,14 +188,14 @@ make3_str(char *str1, char *str2, char *str3)
 	free(str1);
 	free(str2);
 	free(str3);
-	return(res_str);
+	return res_str;
 }
 
 /* and the rest */
 static char *
 make_name(void)
 {
-	return mm_strdup(yytext);
+	return mm_strdup(base_yytext);
 }
 
 static char *
@@ -207,7 +207,7 @@ create_questionmarks(char *name, bool array)
 
 	/* In case we have a struct, we have to print as many "?" as there are attributes in the struct
 	 * An array is only allowed together with an element argument
-	 * This is essantially only used for inserts, but using a struct as input parameter is an error anywhere else
+	 * This is essentially only used for inserts, but using a struct as input parameter is an error anywhere else
 	 * so we don't have to worry here. */
 
 	if (p->type->type == ECPGt_struct || (array && p->type->type == ECPGt_array && p->type->u.element->type == ECPGt_struct))
@@ -233,7 +233,7 @@ create_questionmarks(char *name, bool array)
 	/* removed the trailing " ," */
 
 	result[strlen(result)-3] = '\0';
-	return(result);
+	return result;
 }
 
 static char *
@@ -352,7 +352,7 @@ adjust_outofscope_cursor_vars(struct cursor *cur)
 				else
 				{
 					newvar = new_variable(cat_str(4, mm_strdup("("),
-												  mm_strdup(ecpg_type_name(ptr->variable->type->type)),
+												  mm_strdup(ecpg_type_name(ptr->variable->type->u.element->type)),
 												  mm_strdup(" *)(ECPGget_var("),
 												  mm_strdup(var_text)),
 										  ECPGmake_array_type(ECPGmake_simple_type(ptr->variable->type->u.element->type,

@@ -47,8 +47,8 @@
     </term>
     <listitem>
     <para>
-     Returns the name of the protocol used for the SSL connection (e.g. SSLv2,
-     SSLv3, or TLSv1).
+     Returns the name of the protocol used for the SSL connection (e.g. TLSv1.0
+     TLSv1.1, or TLSv1.2).
     </para>
     </listitem>
    </varlistentry>
@@ -150,7 +150,7 @@
     </para>
     <para>
      This function is really useful only if you have more than one trusted CA
-     certificate in your server's <filename>root.crt</> file, or if this CA
+     certificate in your server's certificate authority file, or if this CA
      has issued some intermediate certificate authority certificates.
     </para>
     </listitem>

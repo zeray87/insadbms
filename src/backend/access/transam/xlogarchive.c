@@ -4,7 +4,7 @@
  *		Functions for archiving WAL files and restoring from the archive.
  *
  *
- * Portions Copyright (c) 1996-2016, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2017, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * src/backend/access/transam/xlogarchive.c
@@ -14,7 +14,6 @@
 
 #include "postgres.h"
 
-#include <sys/types.h>
 #include <sys/stat.h>
 #include <sys/wait.h>
 #include <signal.h>
@@ -135,13 +134,14 @@ RestoreArchivedFile(char *path, const char *xlogfname,
 	if (cleanupEnabled)
 	{
 		GetOldestRestartPoint(&restartRedoPtr, &restartTli);
-		XLByteToSeg(restartRedoPtr, restartSegNo);
-		XLogFileName(lastRestartPointFname, restartTli, restartSegNo);
+		XLByteToSeg(restartRedoPtr, restartSegNo, wal_segment_size);
+		XLogFileName(lastRestartPointFname, restartTli, restartSegNo,
+					 wal_segment_size);
 		/* we shouldn't need anything earlier than last restart point */
 		Assert(strcmp(lastRestartPointFname, xlogfname) <= 0);
 	}
 	else
-		XLogFileName(lastRestartPointFname, 0, 0L);
+		XLogFileName(lastRestartPointFname, 0, 0L, wal_segment_size);
 
 	/*
 	 * construct the command to be executed
@@ -348,8 +348,9 @@ ExecuteRecoveryCommand(char *command, char *commandName, bool failOnSignal)
 	 * archive, though there is no requirement to do so.
 	 */
 	GetOldestRestartPoint(&restartRedoPtr, &restartTli);
-	XLByteToSeg(restartRedoPtr, restartSegNo);
-	XLogFileName(lastRestartPointFname, restartTli, restartSegNo);
+	XLByteToSeg(restartRedoPtr, restartSegNo, wal_segment_size);
+	XLogFileName(lastRestartPointFname, restartTli, restartSegNo,
+				 wal_segment_size);
 
 	/*
 	 * construct the command to be executed
@@ -421,7 +422,7 @@ ExecuteRecoveryCommand(char *command, char *commandName, bool failOnSignal)
 /*
  * A file was restored from the archive under a temporary filename (path),
  * and now we want to keep it. Rename it under the permanent filename in
- * in pg_xlog (xlogfname), replacing any existing file with the same name.
+ * in pg_wal (xlogfname), replacing any existing file with the same name.
  */
 void
 KeepFileRestoredFromArchive(char *path, char *xlogfname)
@@ -548,7 +549,7 @@ XLogArchiveNotifySeg(XLogSegNo segno)
 {
 	char		xlog[MAXFNAMELEN];
 
-	XLogFileName(xlog, ThisTimeLineID, segno);
+	XLogFileName(xlog, ThisTimeLineID, segno, wal_segment_size);
 	XLogArchiveNotify(xlog);
 }
 

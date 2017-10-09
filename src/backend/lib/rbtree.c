@@ -17,7 +17,7 @@
  * longest path from root to leaf is only about twice as long as the shortest,
  * so lookups are guaranteed to run in O(lg n) time.
  *
- * Copyright (c) 2009-2016, PostgreSQL Global Development Group
+ * Copyright (c) 2009-2017, PostgreSQL Global Development Group
  *
  * IDENTIFICATION
  *	  src/backend/lib/rbtree.c
@@ -28,17 +28,6 @@
 
 #include "lib/rbtree.h"
 
-
-/*
- * Values of RBNode.iteratorState
- *
- * Note that iteratorState has an undefined value except in nodes that are
- * currently being visited by an active iteration.
- */
-#define InitialState	(0)
-#define FirstStepDone	(1)
-#define SecondStepDone	(2)
-#define ThirdStepDone	(3)
 
 /*
  * Colors of nodes (values of RBNode.color)
@@ -52,10 +41,6 @@
 struct RBTree
 {
 	RBNode	   *root;			/* root node, or RBNIL if tree is empty */
-
-	/* Iteration state */
-	RBNode	   *cur;			/* current iteration node */
-	RBNode	   *(*iterate) (RBTree *rb);
 
 	/* Remaining fields are constant after rb_create */
 
@@ -75,7 +60,7 @@ struct RBTree
  */
 #define RBNIL (&sentinel)
 
-static RBNode sentinel = {InitialState, RBBLACK, RBNIL, RBNIL, NULL};
+static RBNode sentinel = {RBBLACK, RBNIL, RBNIL, NULL};
 
 
 /*
@@ -123,8 +108,6 @@ rb_create(Size node_size,
 	Assert(node_size > sizeof(RBNode));
 
 	tree->root = RBNIL;
-	tree->cur = RBNIL;
-	tree->iterate = NULL;
 	tree->node_size = node_size;
 	tree->comparator = comparator;
 	tree->combiner = combiner;
@@ -435,9 +418,8 @@ rb_insert(RBTree *rb, const RBNode *data, bool *isNew)
 	 */
 	*isNew = true;
 
-	x = rb->allocfunc (rb->arg);
+	x = rb->allocfunc(rb->arg);
 
-	x->iteratorState = InitialState;
 	x->color = RBRED;
 
 	x->left = RBNIL;
@@ -574,6 +556,7 @@ rb_delete_node(RBTree *rb, RBNode *z)
 	RBNode	   *x,
 			   *y;
 
+	/* This is just paranoia: we should only get called on a valid node */
 	if (!z || z == RBNIL)
 		return;
 
@@ -631,7 +614,7 @@ rb_delete_node(RBTree *rb, RBNode *z)
 
 	/* Now we can recycle the y node */
 	if (rb->freefunc)
-		rb->freefunc (y, rb->arg);
+		rb->freefunc(y, rb->arg);
 }
 
 /*
@@ -653,171 +636,88 @@ rb_delete(RBTree *rb, RBNode *node)
  *						  Traverse									  *
  **********************************************************************/
 
-/*
- * The iterator routines were originally coded in tail-recursion style,
- * which is nice to look at, but is trouble if your compiler isn't smart
- * enough to optimize it.  Now we just use looping.
- */
-#define descend(next_node) \
-	do { \
-		(next_node)->iteratorState = InitialState; \
-		node = rb->cur = (next_node); \
-		goto restart; \
-	} while (0)
-
-#define ascend(next_node) \
-	do { \
-		node = rb->cur = (next_node); \
-		goto restart; \
-	} while (0)
-
-
 static RBNode *
-rb_left_right_iterator(RBTree *rb)
+rb_left_right_iterator(RBTreeIterator *iter)
 {
-	RBNode	   *node = rb->cur;
-
-restart:
-	switch (node->iteratorState)
+	if (iter->last_visited == NULL)
 	{
-		case InitialState:
-			if (node->left != RBNIL)
-			{
-				node->iteratorState = FirstStepDone;
-				descend(node->left);
-			}
-			/* FALL THROUGH */
-		case FirstStepDone:
-			node->iteratorState = SecondStepDone;
-			return node;
-		case SecondStepDone:
-			if (node->right != RBNIL)
-			{
-				node->iteratorState = ThirdStepDone;
-				descend(node->right);
-			}
-			/* FALL THROUGH */
-		case ThirdStepDone:
-			if (node->parent)
-				ascend(node->parent);
-			break;
-		default:
-			elog(ERROR, "unrecognized rbtree node state: %d",
-				 node->iteratorState);
+		iter->last_visited = iter->rb->root;
+		while (iter->last_visited->left != RBNIL)
+			iter->last_visited = iter->last_visited->left;
+
+		return iter->last_visited;
 	}
 
-	return NULL;
+	if (iter->last_visited->right != RBNIL)
+	{
+		iter->last_visited = iter->last_visited->right;
+		while (iter->last_visited->left != RBNIL)
+			iter->last_visited = iter->last_visited->left;
+
+		return iter->last_visited;
+	}
+
+	for (;;)
+	{
+		RBNode	   *came_from = iter->last_visited;
+
+		iter->last_visited = iter->last_visited->parent;
+		if (iter->last_visited == NULL)
+		{
+			iter->is_over = true;
+			break;
+		}
+
+		if (iter->last_visited->left == came_from)
+			break;				/* came from left sub-tree, return current
+								 * node */
+
+		/* else - came from right sub-tree, continue to move up */
+	}
+
+	return iter->last_visited;
 }
 
 static RBNode *
-rb_right_left_iterator(RBTree *rb)
+rb_right_left_iterator(RBTreeIterator *iter)
 {
-	RBNode	   *node = rb->cur;
-
-restart:
-	switch (node->iteratorState)
+	if (iter->last_visited == NULL)
 	{
-		case InitialState:
-			if (node->right != RBNIL)
-			{
-				node->iteratorState = FirstStepDone;
-				descend(node->right);
-			}
-			/* FALL THROUGH */
-		case FirstStepDone:
-			node->iteratorState = SecondStepDone;
-			return node;
-		case SecondStepDone:
-			if (node->left != RBNIL)
-			{
-				node->iteratorState = ThirdStepDone;
-				descend(node->left);
-			}
-			/* FALL THROUGH */
-		case ThirdStepDone:
-			if (node->parent)
-				ascend(node->parent);
-			break;
-		default:
-			elog(ERROR, "unrecognized rbtree node state: %d",
-				 node->iteratorState);
+		iter->last_visited = iter->rb->root;
+		while (iter->last_visited->right != RBNIL)
+			iter->last_visited = iter->last_visited->right;
+
+		return iter->last_visited;
 	}
 
-	return NULL;
-}
-
-static RBNode *
-rb_direct_iterator(RBTree *rb)
-{
-	RBNode	   *node = rb->cur;
-
-restart:
-	switch (node->iteratorState)
+	if (iter->last_visited->left != RBNIL)
 	{
-		case InitialState:
-			node->iteratorState = FirstStepDone;
-			return node;
-		case FirstStepDone:
-			if (node->left != RBNIL)
-			{
-				node->iteratorState = SecondStepDone;
-				descend(node->left);
-			}
-			/* FALL THROUGH */
-		case SecondStepDone:
-			if (node->right != RBNIL)
-			{
-				node->iteratorState = ThirdStepDone;
-				descend(node->right);
-			}
-			/* FALL THROUGH */
-		case ThirdStepDone:
-			if (node->parent)
-				ascend(node->parent);
-			break;
-		default:
-			elog(ERROR, "unrecognized rbtree node state: %d",
-				 node->iteratorState);
+		iter->last_visited = iter->last_visited->left;
+		while (iter->last_visited->right != RBNIL)
+			iter->last_visited = iter->last_visited->right;
+
+		return iter->last_visited;
 	}
 
-	return NULL;
-}
-
-static RBNode *
-rb_inverted_iterator(RBTree *rb)
-{
-	RBNode	   *node = rb->cur;
-
-restart:
-	switch (node->iteratorState)
+	for (;;)
 	{
-		case InitialState:
-			if (node->left != RBNIL)
-			{
-				node->iteratorState = FirstStepDone;
-				descend(node->left);
-			}
-			/* FALL THROUGH */
-		case FirstStepDone:
-			if (node->right != RBNIL)
-			{
-				node->iteratorState = SecondStepDone;
-				descend(node->right);
-			}
-			/* FALL THROUGH */
-		case SecondStepDone:
-			node->iteratorState = ThirdStepDone;
-			return node;
-		case ThirdStepDone:
-			if (node->parent)
-				ascend(node->parent);
+		RBNode	   *came_from = iter->last_visited;
+
+		iter->last_visited = iter->last_visited->parent;
+		if (iter->last_visited == NULL)
+		{
+			iter->is_over = true;
 			break;
-		default:
-			elog(ERROR, "unrecognized rbtree node state: %d",
-				 node->iteratorState);
+		}
+
+		if (iter->last_visited->right == came_from)
+			break;				/* came from right sub-tree, return current
+								 * node */
+
+		/* else - came from left sub-tree, continue to move up */
 	}
 
-	return NULL;
+	return iter->last_visited;
 }
 
 /*
@@ -827,33 +727,27 @@ restart:
  * returns NULL or the traversal stops being of interest.
  *
  * If the tree is changed during traversal, results of further calls to
- * rb_iterate are unspecified.
+ * rb_iterate are unspecified.  Multiple concurrent iterators on the same
+ * tree are allowed.
  *
- * Note: this used to return a separately palloc'd iterator control struct,
- * but that's a bit pointless since the data structure is incapable of
- * supporting multiple concurrent traversals.  Now we just keep the state
- * in RBTree.
+ * The iterator state is stored in the 'iter' struct.  The caller should
+ * treat it as an opaque struct.
  */
 void
-rb_begin_iterate(RBTree *rb, RBOrderControl ctrl)
+rb_begin_iterate(RBTree *rb, RBOrderControl ctrl, RBTreeIterator *iter)
 {
-	rb->cur = rb->root;
-	if (rb->cur != RBNIL)
-		rb->cur->iteratorState = InitialState;
+	/* Common initialization for all traversal orders */
+	iter->rb = rb;
+	iter->last_visited = NULL;
+	iter->is_over = (rb->root == RBNIL);
 
 	switch (ctrl)
 	{
 		case LeftRightWalk:		/* visit left, then self, then right */
-			rb->iterate = rb_left_right_iterator;
+			iter->iterate = rb_left_right_iterator;
 			break;
 		case RightLeftWalk:		/* visit right, then self, then left */
-			rb->iterate = rb_right_left_iterator;
-			break;
-		case DirectWalk:		/* visit self, then left, then right */
-			rb->iterate = rb_direct_iterator;
-			break;
-		case InvertedWalk:		/* visit left, then right, then self */
-			rb->iterate = rb_inverted_iterator;
+			iter->iterate = rb_right_left_iterator;
 			break;
 		default:
 			elog(ERROR, "unrecognized rbtree iteration order: %d", ctrl);
@@ -864,10 +758,10 @@ rb_begin_iterate(RBTree *rb, RBOrderControl ctrl)
  * rb_iterate: return the next node in traversal order, or NULL if no more
  */
 RBNode *
-rb_iterate(RBTree *rb)
+rb_iterate(RBTreeIterator *iter)
 {
-	if (rb->cur == RBNIL)
+	if (iter->is_over)
 		return NULL;
 
-	return rb->iterate(rb);
+	return iter->iterate(iter);
 }

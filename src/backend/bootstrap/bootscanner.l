@@ -4,7 +4,7 @@
  * bootscanner.l
  *	  a lexical scanner for the bootstrap parser
  *
- * Portions Copyright (c) 1996-2016, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2017, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  *
@@ -66,32 +66,31 @@ static int	yyline = 1;			/* line number for error reporting */
 
 D		[0-9]
 oct		\\{D}{D}{D}
-Exp		[Ee][-+]?{D}+
 id		([A-Za-z0-9_]|{oct}|\-)+
 sid		\"([^\"])*\"
 arrayid [A-Za-z0-9_]+\[{D}*\]
 
 %%
 
-open			{ return(OPEN); }
+open			{ return OPEN; }
 
-close			{ return(XCLOSE); }
+close			{ return XCLOSE; }
 
-create			{ return(XCREATE); }
+create			{ return XCREATE; }
 
-OID				{ return(OBJ_ID); }
-bootstrap		{ return(XBOOTSTRAP); }
-"shared_relation"	{ return(XSHARED_RELATION); }
-"without_oids"	{ return(XWITHOUT_OIDS); }
-"rowtype_oid"	{ return(XROWTYPE_OID); }
-_null_			{ return(NULLVAL); }
+OID				{ return OBJ_ID; }
+bootstrap		{ return XBOOTSTRAP; }
+"shared_relation"	{ return XSHARED_RELATION; }
+"without_oids"	{ return XWITHOUT_OIDS; }
+"rowtype_oid"	{ return XROWTYPE_OID; }
+_null_			{ return NULLVAL; }
 
-insert			{ return(INSERT_TUPLE); }
+insert			{ return INSERT_TUPLE; }
 
-","				{ return(COMMA); }
-"="				{ return(EQUALS); }
-"("				{ return(LPAREN); }
-")"				{ return(RPAREN); }
+","				{ return COMMA; }
+"="				{ return EQUALS; }
+"("				{ return LPAREN; }
+")"				{ return RPAREN; }
 
 [\n]			{ yyline++; }
 [\t]			;
@@ -100,39 +99,32 @@ insert			{ return(INSERT_TUPLE); }
 ^\#[^\n]* ; /* drop everything after "#" for comments */
 
 
-"declare"		{ return(XDECLARE); }
-"build"			{ return(XBUILD); }
-"indices"		{ return(INDICES); }
-"unique"		{ return(UNIQUE); }
-"index"			{ return(INDEX); }
-"on"			{ return(ON); }
-"using"			{ return(USING); }
-"toast"			{ return(XTOAST); }
-"FORCE"			{ return(XFORCE); }
-"NOT"			{ return(XNOT); }
-"NULL"			{ return(XNULL); }
+"declare"		{ return XDECLARE; }
+"build"			{ return XBUILD; }
+"indices"		{ return INDICES; }
+"unique"		{ return UNIQUE; }
+"index"			{ return INDEX; }
+"on"			{ return ON; }
+"using"			{ return USING; }
+"toast"			{ return XTOAST; }
+"FORCE"			{ return XFORCE; }
+"NOT"			{ return XNOT; }
+"NULL"			{ return XNULL; }
 
 {arrayid}		{
 					yylval.str = MapArrayTypeName(yytext);
-					return(ID);
+					return ID;
 				}
 {id}			{
 					yylval.str = scanstr(yytext);
-					return(ID);
+					return ID;
 				}
 {sid}			{
 					yytext[strlen(yytext)-1] = '\0'; /* strip off quotes */
 					yylval.str = scanstr(yytext+1);
 					yytext[strlen(yytext)] = '"'; /* restore quotes */
-					return(ID);
+					return ID;
 				}
-
-(-)?{D}+"."{D}*({Exp})? |
-(-)?{D}*"."{D}+({Exp})? |
-(-)?{D}+{Exp}			{
-							yylval.str = pstrdup(yytext);
-							return(CONST_P);
-						}
 
 .				{
 					elog(ERROR, "syntax error at line %d: unexpected character \"%s\"", yyline, yytext);

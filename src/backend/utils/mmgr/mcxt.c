@@ -9,7 +9,7 @@
  * context's MemoryContextMethods struct.
  *
  *
- * Portions Copyright (c) 1996-2016, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2017, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  *
@@ -91,16 +91,13 @@ MemoryContextInit(void)
 	AssertState(TopMemoryContext == NULL);
 
 	/*
-	 * Initialize TopMemoryContext as an AllocSetContext with slow growth rate
-	 * --- we don't really expect much to be allocated in it.
-	 *
-	 * (There is special-case code in MemoryContextCreate() for this call.)
+	 * First, initialize TopMemoryContext, which will hold the MemoryContext
+	 * nodes for all other contexts.  (There is special-case code in
+	 * MemoryContextCreate() to handle this call.)
 	 */
 	TopMemoryContext = AllocSetContextCreate((MemoryContext) NULL,
 											 "TopMemoryContext",
-											 0,
-											 8 * 1024,
-											 8 * 1024);
+											 ALLOCSET_DEFAULT_SIZES);
 
 	/*
 	 * Not having any other place to point CurrentMemoryContext, make it point
@@ -162,7 +159,7 @@ MemoryContextResetOnly(MemoryContext context)
 	if (!context->isReset)
 	{
 		MemoryContextCallResetCallbacks(context);
-		(*context->methods->reset) (context);
+		context->methods->reset(context);
 		context->isReset = true;
 		VALGRIND_DESTROY_MEMPOOL(context);
 		VALGRIND_CREATE_MEMPOOL(context, 0, false);
@@ -225,7 +222,7 @@ MemoryContextDelete(MemoryContext context)
 	 */
 	MemoryContextSetParent(context, NULL);
 
-	(*context->methods->delete_context) (context);
+	context->methods->delete_context(context);
 	VALGRIND_DESTROY_MEMPOOL(context);
 	pfree(context);
 }
@@ -294,7 +291,7 @@ MemoryContextCallResetCallbacks(MemoryContext context)
 	while ((cb = context->reset_cbs) != NULL)
 	{
 		context->reset_cbs = cb->next;
-		(*cb->func) (cb->arg);
+		cb->func(cb->arg);
 	}
 }
 
@@ -392,55 +389,9 @@ MemoryContextAllowInCriticalSection(MemoryContext context, bool allow)
 Size
 GetMemoryChunkSpace(void *pointer)
 {
-	StandardChunkHeader *header;
+	MemoryContext context = GetMemoryChunkContext(pointer);
 
-	/*
-	 * Try to detect bogus pointers handed to us, poorly though we can.
-	 * Presumably, a pointer that isn't MAXALIGNED isn't pointing at an
-	 * allocated chunk.
-	 */
-	Assert(pointer != NULL);
-	Assert(pointer == (void *) MAXALIGN(pointer));
-
-	/*
-	 * OK, it's probably safe to look at the chunk header.
-	 */
-	header = (StandardChunkHeader *)
-		((char *) pointer - STANDARDCHUNKHEADERSIZE);
-
-	AssertArg(MemoryContextIsValid(header->context));
-
-	return (*header->context->methods->get_chunk_space) (header->context,
-														 pointer);
-}
-
-/*
- * GetMemoryChunkContext
- *		Given a currently-allocated chunk, determine the context
- *		it belongs to.
- */
-MemoryContext
-GetMemoryChunkContext(void *pointer)
-{
-	StandardChunkHeader *header;
-
-	/*
-	 * Try to detect bogus pointers handed to us, poorly though we can.
-	 * Presumably, a pointer that isn't MAXALIGNED isn't pointing at an
-	 * allocated chunk.
-	 */
-	Assert(pointer != NULL);
-	Assert(pointer == (void *) MAXALIGN(pointer));
-
-	/*
-	 * OK, it's probably safe to look at the chunk header.
-	 */
-	header = (StandardChunkHeader *)
-		((char *) pointer - STANDARDCHUNKHEADERSIZE);
-
-	AssertArg(MemoryContextIsValid(header->context));
-
-	return header->context;
+	return context->methods->get_chunk_space(context, pointer);
 }
 
 /*
@@ -471,7 +422,7 @@ MemoryContextIsEmpty(MemoryContext context)
 	if (context->firstchild != NULL)
 		return false;
 	/* Otherwise use the type-specific inquiry */
-	return (*context->methods->is_empty) (context);
+	return context->methods->is_empty(context);
 }
 
 /*
@@ -504,7 +455,7 @@ MemoryContextStatsDetail(MemoryContext context, int max_children)
 	MemoryContextStatsInternal(context, 0, true, max_children, &grand_totals);
 
 	fprintf(stderr,
-	"Grand total: %zu bytes in %zd blocks; %zu free (%zd chunks); %zu used\n",
+			"Grand total: %zu bytes in %zd blocks; %zu free (%zd chunks); %zu used\n",
 			grand_totals.totalspace, grand_totals.nblocks,
 			grand_totals.freespace, grand_totals.freechunks,
 			grand_totals.totalspace - grand_totals.freespace);
@@ -529,7 +480,7 @@ MemoryContextStatsInternal(MemoryContext context, int level,
 	AssertArg(MemoryContextIsValid(context));
 
 	/* Examine the context itself */
-	(*context->methods->stats) (context, level, print, totals);
+	context->methods->stats(context, level, print, totals);
 
 	/*
 	 * Examine children.  If there are more than max_children of them, we do
@@ -594,7 +545,7 @@ MemoryContextCheck(MemoryContext context)
 
 	AssertArg(MemoryContextIsValid(context));
 
-	(*context->methods->check) (context);
+	context->methods->check(context);
 	for (child = context->firstchild; child != NULL; child = child->nextchild)
 		MemoryContextCheck(child);
 }
@@ -614,9 +565,13 @@ MemoryContextCheck(MemoryContext context)
 bool
 MemoryContextContains(MemoryContext context, void *pointer)
 {
-	StandardChunkHeader *header;
+	MemoryContext ptr_context;
 
 	/*
+	 * NB: Can't use GetMemoryChunkContext() here - that performs assertions
+	 * that aren't acceptable here since we might be passed memory not
+	 * allocated by any memory context.
+	 *
 	 * Try to detect bogus pointers handed to us, poorly though we can.
 	 * Presumably, a pointer that isn't MAXALIGNED isn't pointing at an
 	 * allocated chunk.
@@ -625,12 +580,11 @@ MemoryContextContains(MemoryContext context, void *pointer)
 		return false;
 
 	/*
-	 * OK, it's probably safe to look at the chunk header.
+	 * OK, it's probably safe to look at the context.
 	 */
-	header = (StandardChunkHeader *)
-		((char *) pointer - STANDARDCHUNKHEADERSIZE);
+	ptr_context = *(MemoryContext *) (((char *) pointer) - sizeof(void *));
 
-	return header->context == context;
+	return ptr_context == context;
 }
 
 /*--------------------
@@ -720,7 +674,7 @@ MemoryContextCreate(NodeTag tag, Size size,
 	strcpy(node->name, name);
 
 	/* Type-specific routine finishes any other essential initialization */
-	(*node->methods->init) (node);
+	node->methods->init(node);
 
 	/* OK to link node to parent (if any) */
 	/* Could use MemoryContextSetParent here, but doesn't seem worthwhile */
@@ -761,7 +715,7 @@ MemoryContextAlloc(MemoryContext context, Size size)
 
 	context->isReset = false;
 
-	ret = (*context->methods->alloc) (context, size);
+	ret = context->methods->alloc(context, size);
 	if (ret == NULL)
 	{
 		MemoryContextStats(TopMemoryContext);
@@ -796,7 +750,7 @@ MemoryContextAllocZero(MemoryContext context, Size size)
 
 	context->isReset = false;
 
-	ret = (*context->methods->alloc) (context, size);
+	ret = context->methods->alloc(context, size);
 	if (ret == NULL)
 	{
 		MemoryContextStats(TopMemoryContext);
@@ -833,7 +787,7 @@ MemoryContextAllocZeroAligned(MemoryContext context, Size size)
 
 	context->isReset = false;
 
-	ret = (*context->methods->alloc) (context, size);
+	ret = context->methods->alloc(context, size);
 	if (ret == NULL)
 	{
 		MemoryContextStats(TopMemoryContext);
@@ -868,7 +822,7 @@ MemoryContextAllocExtended(MemoryContext context, Size size, int flags)
 
 	context->isReset = false;
 
-	ret = (*context->methods->alloc) (context, size);
+	ret = context->methods->alloc(context, size);
 	if (ret == NULL)
 	{
 		if ((flags & MCXT_ALLOC_NO_OOM) == 0)
@@ -904,7 +858,7 @@ palloc(Size size)
 
 	CurrentMemoryContext->isReset = false;
 
-	ret = (*CurrentMemoryContext->methods->alloc) (CurrentMemoryContext, size);
+	ret = CurrentMemoryContext->methods->alloc(CurrentMemoryContext, size);
 	if (ret == NULL)
 	{
 		MemoryContextStats(TopMemoryContext);
@@ -933,7 +887,7 @@ palloc0(Size size)
 
 	CurrentMemoryContext->isReset = false;
 
-	ret = (*CurrentMemoryContext->methods->alloc) (CurrentMemoryContext, size);
+	ret = CurrentMemoryContext->methods->alloc(CurrentMemoryContext, size);
 	if (ret == NULL)
 	{
 		MemoryContextStats(TopMemoryContext);
@@ -965,7 +919,7 @@ palloc_extended(Size size, int flags)
 
 	CurrentMemoryContext->isReset = false;
 
-	ret = (*CurrentMemoryContext->methods->alloc) (CurrentMemoryContext, size);
+	ret = CurrentMemoryContext->methods->alloc(CurrentMemoryContext, size);
 	if (ret == NULL)
 	{
 		if ((flags & MCXT_ALLOC_NO_OOM) == 0)
@@ -994,25 +948,9 @@ palloc_extended(Size size, int flags)
 void
 pfree(void *pointer)
 {
-	MemoryContext context;
+	MemoryContext context = GetMemoryChunkContext(pointer);
 
-	/*
-	 * Try to detect bogus pointers handed to us, poorly though we can.
-	 * Presumably, a pointer that isn't MAXALIGNED isn't pointing at an
-	 * allocated chunk.
-	 */
-	Assert(pointer != NULL);
-	Assert(pointer == (void *) MAXALIGN(pointer));
-
-	/*
-	 * OK, it's probably safe to look at the chunk header.
-	 */
-	context = ((StandardChunkHeader *)
-			   ((char *) pointer - STANDARDCHUNKHEADERSIZE))->context;
-
-	AssertArg(MemoryContextIsValid(context));
-
-	(*context->methods->free_p) (context, pointer);
+	context->methods->free_p(context, pointer);
 	VALGRIND_MEMPOOL_FREE(context, pointer);
 }
 
@@ -1023,33 +961,18 @@ pfree(void *pointer)
 void *
 repalloc(void *pointer, Size size)
 {
-	MemoryContext context;
+	MemoryContext context = GetMemoryChunkContext(pointer);
 	void	   *ret;
 
 	if (!AllocSizeIsValid(size))
 		elog(ERROR, "invalid memory alloc request size %zu", size);
 
-	/*
-	 * Try to detect bogus pointers handed to us, poorly though we can.
-	 * Presumably, a pointer that isn't MAXALIGNED isn't pointing at an
-	 * allocated chunk.
-	 */
-	Assert(pointer != NULL);
-	Assert(pointer == (void *) MAXALIGN(pointer));
-
-	/*
-	 * OK, it's probably safe to look at the chunk header.
-	 */
-	context = ((StandardChunkHeader *)
-			   ((char *) pointer - STANDARDCHUNKHEADERSIZE))->context;
-
-	AssertArg(MemoryContextIsValid(context));
 	AssertNotInCriticalSection(context);
 
 	/* isReset must be false already */
 	Assert(!context->isReset);
 
-	ret = (*context->methods->realloc) (context, pointer, size);
+	ret = context->methods->realloc(context, pointer, size);
 	if (ret == NULL)
 	{
 		MemoryContextStats(TopMemoryContext);
@@ -1083,7 +1006,7 @@ MemoryContextAllocHuge(MemoryContext context, Size size)
 
 	context->isReset = false;
 
-	ret = (*context->methods->alloc) (context, size);
+	ret = context->methods->alloc(context, size);
 	if (ret == NULL)
 	{
 		MemoryContextStats(TopMemoryContext);
@@ -1106,33 +1029,18 @@ MemoryContextAllocHuge(MemoryContext context, Size size)
 void *
 repalloc_huge(void *pointer, Size size)
 {
-	MemoryContext context;
+	MemoryContext context = GetMemoryChunkContext(pointer);
 	void	   *ret;
 
 	if (!AllocHugeSizeIsValid(size))
 		elog(ERROR, "invalid memory alloc request size %zu", size);
 
-	/*
-	 * Try to detect bogus pointers handed to us, poorly though we can.
-	 * Presumably, a pointer that isn't MAXALIGNED isn't pointing at an
-	 * allocated chunk.
-	 */
-	Assert(pointer != NULL);
-	Assert(pointer == (void *) MAXALIGN(pointer));
-
-	/*
-	 * OK, it's probably safe to look at the chunk header.
-	 */
-	context = ((StandardChunkHeader *)
-			   ((char *) pointer - STANDARDCHUNKHEADERSIZE))->context;
-
-	AssertArg(MemoryContextIsValid(context));
 	AssertNotInCriticalSection(context);
 
 	/* isReset must be false already */
 	Assert(!context->isReset);
 
-	ret = (*context->methods->realloc) (context, pointer, size);
+	ret = context->methods->realloc(context, pointer, size);
 	if (ret == NULL)
 	{
 		MemoryContextStats(TopMemoryContext);
@@ -1183,4 +1091,18 @@ pnstrdup(const char *in, Size len)
 	memcpy(out, in, len);
 	out[len] = '\0';
 	return out;
+}
+
+/*
+ * Make copy of string with all trailing newline characters removed.
+ */
+char *
+pchomp(const char *in)
+{
+	size_t		n;
+
+	n = strlen(in);
+	while (n > 0 && in[n - 1] == '\n')
+		n--;
+	return pnstrdup(in, n);
 }

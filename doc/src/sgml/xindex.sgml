@@ -288,7 +288,7 @@
    have a fixed set of strategies either. Instead the support routines of
    each operator class interpret the strategy numbers according to the
    operator class's definition. As an example, the strategy numbers used by
-   the built-in operator classes for arrays are shown in
+   the built-in operator class for arrays are shown in
    <xref linkend="xindex-gin-array-strat-table">.
   </para>
 
@@ -436,7 +436,8 @@
    </table>
 
   <para>
-   Hash indexes require one support function, shown in <xref
+   Hash indexes require one support function, and allow a second one to be
+   supplied at the operator class author's option, as shown in <xref
    linkend="xindex-hash-support-table">.
   </para>
 
@@ -451,8 +452,16 @@
      </thead>
      <tbody>
       <row>
-       <entry>Compute the hash value for a key</entry>
+       <entry>Compute the 32-bit hash value for a key</entry>
        <entry>1</entry>
+      </row>
+      <row>
+       <entry>
+         Compute the 64-bit hash value for a key given a 64-bit salt; if
+         the salt is 0, the low 32 bits will match the value that would
+         have been computed by function 1
+       </entry>
+       <entry>2</entry>
       </row>
      </tbody>
     </tgroup>
@@ -792,8 +801,7 @@ CREATE OPERATOR &lt; (
    It is important to specify the correct commutator and negator operators,
    as well as suitable restriction and join selectivity
    functions, otherwise the optimizer will be unable to make effective
-   use of the index.  Note that the less-than, equal, and
-   greater-than cases should use different selectivity functions.
+   use of the index.
   </para>
 
   <para>

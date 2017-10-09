@@ -3,7 +3,7 @@
  * jsonb.c
  *		I/O routines for jsonb type
  *
- * Copyright (c) 2014-2016, PostgreSQL Global Development Group
+ * Copyright (c) 2014-2017, PostgreSQL Global Development Group
  *
  * IDENTIFICATION
  *	  src/backend/utils/adt/jsonb.c
@@ -130,7 +130,7 @@ jsonb_recv(PG_FUNCTION_ARGS)
 Datum
 jsonb_out(PG_FUNCTION_ARGS)
 {
-	Jsonb	   *jb = PG_GETARG_JSONB(0);
+	Jsonb	   *jb = PG_GETARG_JSONB_P(0);
 	char	   *out;
 
 	out = JsonbToCString(NULL, &jb->root, VARSIZE(jb));
@@ -146,7 +146,7 @@ jsonb_out(PG_FUNCTION_ARGS)
 Datum
 jsonb_send(PG_FUNCTION_ARGS)
 {
-	Jsonb	   *jb = PG_GETARG_JSONB(0);
+	Jsonb	   *jb = PG_GETARG_JSONB_P(0);
 	StringInfoData buf;
 	StringInfo	jtext = makeStringInfo();
 	int			version = 1;
@@ -171,7 +171,7 @@ jsonb_send(PG_FUNCTION_ARGS)
 Datum
 jsonb_typeof(PG_FUNCTION_ARGS)
 {
-	Jsonb	   *in = PG_GETARG_JSONB(0);
+	Jsonb	   *in = PG_GETARG_JSONB_P(0);
 	JsonbIterator *it;
 	JsonbValue	v;
 	char	   *result;
@@ -320,8 +320,8 @@ jsonb_put_escaped_value(StringInfo out, JsonbValue *scalarVal)
 			break;
 		case jbvNumeric:
 			appendStringInfoString(out,
-							 DatumGetCString(DirectFunctionCall1(numeric_out,
-								  PointerGetDatum(scalarVal->val.numeric))));
+								   DatumGetCString(DirectFunctionCall1(numeric_out,
+																	   PointerGetDatum(scalarVal->val.numeric))));
 			break;
 		case jbvBool:
 			if (scalarVal->val.boolean)
@@ -644,9 +644,10 @@ jsonb_categorize_type(Oid typoid,
 
 		default:
 			/* Check for arrays and composites */
-			if (OidIsValid(get_element_type(typoid)))
+			if (OidIsValid(get_element_type(typoid)) || typoid == ANYARRAYOID
+				|| typoid == RECORDARRAYOID)
 				*tcategory = JSONBTYPE_ARRAY;
-			else if (type_is_rowtype(typoid))
+			else if (type_is_rowtype(typoid))	/* includes RECORDOID */
 				*tcategory = JSONBTYPE_COMPOSITE;
 			else
 			{
@@ -663,7 +664,7 @@ jsonb_categorize_type(Oid typoid,
 					CoercionPathType ctype;
 
 					ctype = find_coercion_pathway(JSONOID, typoid,
-											   COERCION_EXPLICIT, &castfunc);
+												  COERCION_EXPLICIT, &castfunc);
 					if (ctype == COERCION_PATH_FUNC && OidIsValid(castfunc))
 					{
 						*tcategory = JSONBTYPE_JSONCAST;
@@ -721,7 +722,7 @@ datum_to_jsonb(Datum val, bool is_null, JsonbInState *result,
 	{
 		ereport(ERROR,
 				(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-		 errmsg("key value must be scalar, not array, composite, or json")));
+				 errmsg("key value must be scalar, not array, composite, or json")));
 	}
 	else
 	{
@@ -856,7 +857,7 @@ datum_to_jsonb(Datum val, bool is_null, JsonbInState *result,
 					/* parse the json right into the existing result object */
 					JsonLexContext *lex;
 					JsonSemAction sem;
-					text	   *json = DatumGetTextP(val);
+					text	   *json = DatumGetTextPP(val);
 
 					lex = makeJsonLexContext(json, true);
 
@@ -877,7 +878,7 @@ datum_to_jsonb(Datum val, bool is_null, JsonbInState *result,
 				break;
 			case JSONBTYPE_JSONB:
 				{
-					Jsonb	   *jsonb = DatumGetJsonb(val);
+					Jsonb	   *jsonb = DatumGetJsonbP(val);
 					JsonbIterator *it;
 
 					it = JsonbIteratorInit(&jsonb->root);
@@ -1074,11 +1075,12 @@ composite_to_jsonb(Datum composite, JsonbInState *result)
 		JsonbTypeCategory tcategory;
 		Oid			outfuncoid;
 		JsonbValue	v;
+		Form_pg_attribute att = TupleDescAttr(tupdesc, i);
 
-		if (tupdesc->attrs[i]->attisdropped)
+		if (att->attisdropped)
 			continue;
 
-		attname = NameStr(tupdesc->attrs[i]->attname);
+		attname = NameStr(att->attname);
 
 		v.type = jbvString;
 		/* don't need checkStringLen here - can't exceed maximum name length */
@@ -1095,8 +1097,7 @@ composite_to_jsonb(Datum composite, JsonbInState *result)
 			outfuncoid = InvalidOid;
 		}
 		else
-			jsonb_categorize_type(tupdesc->attrs[i]->atttypid,
-								  &tcategory, &outfuncoid);
+			jsonb_categorize_type(att->atttypid, &tcategory, &outfuncoid);
 
 		datum_to_jsonb(val, isnull, result, tcategory, outfuncoid, false);
 	}
@@ -1211,7 +1212,7 @@ jsonb_build_object(PG_FUNCTION_ARGS)
 		if (val_type == InvalidOid || val_type == UNKNOWNOID)
 			ereport(ERROR,
 					(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-			   errmsg("argument %d: could not determine data type", i + 1)));
+					 errmsg("could not determine data type for argument %d", i + 1)));
 
 		add_jsonb(arg, false, &result, val_type, true);
 
@@ -1234,7 +1235,7 @@ jsonb_build_object(PG_FUNCTION_ARGS)
 		if (val_type == InvalidOid || val_type == UNKNOWNOID)
 			ereport(ERROR,
 					(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-			   errmsg("argument %d: could not determine data type", i + 2)));
+					 errmsg("could not determine data type for argument %d", i + 2)));
 		add_jsonb(arg, PG_ARGISNULL(i + 1), &result, val_type, false);
 	}
 
@@ -1294,7 +1295,7 @@ jsonb_build_array(PG_FUNCTION_ARGS)
 		if (val_type == InvalidOid || val_type == UNKNOWNOID)
 			ereport(ERROR,
 					(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-			   errmsg("argument %d: could not determine data type", i + 1)));
+					 errmsg("could not determine data type for argument %d", i + 1)));
 		add_jsonb(arg, PG_ARGISNULL(i), &result, val_type, false);
 	}
 
@@ -1660,8 +1661,8 @@ jsonb_agg_transfn(PG_FUNCTION_ARGS)
 				{
 					/* same for numeric */
 					v.val.numeric =
-					DatumGetNumeric(DirectFunctionCall1(numeric_uplus,
-											NumericGetDatum(v.val.numeric)));
+						DatumGetNumeric(DirectFunctionCall1(numeric_uplus,
+															NumericGetDatum(v.val.numeric)));
 				}
 				result->res = pushJsonbValue(&result->parseState,
 											 type, &v);
@@ -1849,9 +1850,9 @@ jsonb_object_agg_transfn(PG_FUNCTION_ARGS)
 	single_scalar = false;
 
 	/*
-	 * values can be anything, including structured and null, so we treat
-	 * them as in json_agg_transfn, except that single scalars are always
-	 * pushed as WJB_VALUE items.
+	 * values can be anything, including structured and null, so we treat them
+	 * as in json_agg_transfn, except that single scalars are always pushed as
+	 * WJB_VALUE items.
 	 */
 
 	while ((type = JsonbIteratorNext(&it, &v, false)) != WJB_DONE)
@@ -1890,8 +1891,8 @@ jsonb_object_agg_transfn(PG_FUNCTION_ARGS)
 				{
 					/* same for numeric */
 					v.val.numeric =
-					DatumGetNumeric(DirectFunctionCall1(numeric_uplus,
-											NumericGetDatum(v.val.numeric)));
+						DatumGetNumeric(DirectFunctionCall1(numeric_uplus,
+															NumericGetDatum(v.val.numeric)));
 				}
 				result->res = pushJsonbValue(&result->parseState,
 											 single_scalar ? WJB_VALUE : type,

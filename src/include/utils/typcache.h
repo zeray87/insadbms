@@ -6,7 +6,7 @@
  * The type cache exists to speed lookup of certain information about data
  * types that is not directly available from a type's pg_type row.
  *
- * Portions Copyright (c) 1996-2016, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2017, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * src/include/utils/typcache.h
@@ -18,6 +18,8 @@
 
 #include "access/tupdesc.h"
 #include "fmgr.h"
+#include "storage/dsm.h"
+#include "utils/dsa.h"
 
 
 /* DomainConstraintCache is an opaque struct known only within typcache.c */
@@ -56,6 +58,7 @@ typedef struct TypeCacheEntry
 	Oid			gt_opr;			/* the greater-than operator */
 	Oid			cmp_proc;		/* the btree comparison function */
 	Oid			hash_proc;		/* the hash calculation function */
+	Oid			hash_extended_proc; /* the extended hash calculation function */
 
 	/*
 	 * Pre-set-up fmgr call info for the equality operator, the btree
@@ -67,6 +70,7 @@ typedef struct TypeCacheEntry
 	FmgrInfo	eq_opr_finfo;
 	FmgrInfo	cmp_proc_finfo;
 	FmgrInfo	hash_proc_finfo;
+	FmgrInfo	hash_extended_proc_finfo;
 
 	/*
 	 * Tuple descriptor if it's a composite type (row type).  NULL if not
@@ -83,9 +87,9 @@ typedef struct TypeCacheEntry
 	 */
 	struct TypeCacheEntry *rngelemtype; /* range's element type */
 	Oid			rng_collation;	/* collation for comparisons, if any */
-	FmgrInfo	rng_cmp_proc_finfo;		/* comparison function */
+	FmgrInfo	rng_cmp_proc_finfo; /* comparison function */
 	FmgrInfo	rng_canonical_finfo;	/* canonicalization function, if any */
-	FmgrInfo	rng_subdiff_finfo;		/* difference function, if any */
+	FmgrInfo	rng_subdiff_finfo;	/* difference function, if any */
 
 	/*
 	 * Domain constraint data if it's a domain type.  NULL if not domain, or
@@ -120,6 +124,8 @@ typedef struct TypeCacheEntry
 #define TYPECACHE_HASH_OPFAMILY		0x0400
 #define TYPECACHE_RANGE_INFO		0x0800
 #define TYPECACHE_DOMAIN_INFO		0x1000
+#define TYPECACHE_HASH_EXTENDED_PROC		0x2000
+#define TYPECACHE_HASH_EXTENDED_PROC_FINFO	0x4000
 
 /*
  * Callers wishing to maintain a long-lived reference to a domain's constraint
@@ -131,18 +137,20 @@ typedef struct DomainConstraintRef
 {
 	List	   *constraints;	/* list of DomainConstraintState nodes */
 	MemoryContext refctx;		/* context holding DomainConstraintRef */
+	TypeCacheEntry *tcache;		/* typcache entry for domain type */
+	bool		need_exprstate; /* does caller need check_exprstate? */
 
 	/* Management data --- treat these fields as private to typcache.c */
-	TypeCacheEntry *tcache;		/* owning typcache entry */
 	DomainConstraintCache *dcc; /* current constraints, or NULL if none */
-	MemoryContextCallback callback;		/* used to release refcount when done */
+	MemoryContextCallback callback; /* used to release refcount when done */
 } DomainConstraintRef;
 
+typedef struct SharedRecordTypmodRegistry SharedRecordTypmodRegistry;
 
 extern TypeCacheEntry *lookup_type_cache(Oid type_id, int flags);
 
 extern void InitDomainConstraintRef(Oid type_id, DomainConstraintRef *ref,
-						MemoryContext refctx);
+						MemoryContext refctx, bool need_exprstate);
 
 extern void UpdateDomainConstraintRef(DomainConstraintRef *ref);
 
@@ -159,4 +167,11 @@ extern void assign_record_type_typmod(TupleDesc tupDesc);
 
 extern int	compare_values_of_enum(TypeCacheEntry *tcache, Oid arg1, Oid arg2);
 
-#endif   /* TYPCACHE_H */
+extern size_t SharedRecordTypmodRegistryEstimate(void);
+
+extern void SharedRecordTypmodRegistryInit(SharedRecordTypmodRegistry *,
+							   dsm_segment *segment, dsa_area *area);
+
+extern void SharedRecordTypmodRegistryAttach(SharedRecordTypmodRegistry *);
+
+#endif							/* TYPCACHE_H */

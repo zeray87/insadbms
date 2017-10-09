@@ -1,9 +1,38 @@
 #include "postgres.h"
+
 #include "fmgr.h"
 #include "plpython.h"
 #include "ltree.h"
 
 PG_MODULE_MAGIC;
+
+extern void _PG_init(void);
+
+/* Linkage to functions in plpython module */
+#if PY_MAJOR_VERSION >= 3
+typedef PyObject *(*PLyUnicode_FromStringAndSize_t) (const char *s, Py_ssize_t size);
+static PLyUnicode_FromStringAndSize_t PLyUnicode_FromStringAndSize_p;
+#endif
+
+
+/*
+ * Module initialize function: fetch function pointers for cross-module calls.
+ */
+void
+_PG_init(void)
+{
+	/* Asserts verify that typedefs above match original declarations */
+#if PY_MAJOR_VERSION >= 3
+	AssertVariableIsOfType(&PLyUnicode_FromStringAndSize, PLyUnicode_FromStringAndSize_t);
+	PLyUnicode_FromStringAndSize_p = (PLyUnicode_FromStringAndSize_t)
+		load_external_function("$libdir/" PLPYTHON_LIBNAME, "PLyUnicode_FromStringAndSize",
+							   true, NULL);
+#endif
+}
+
+
+/* These defines must be after the module init function */
+#define PLyUnicode_FromStringAndSize PLyUnicode_FromStringAndSize_p
 
 
 PG_FUNCTION_INFO_V1(ltree_to_plpython);
@@ -11,7 +40,7 @@ PG_FUNCTION_INFO_V1(ltree_to_plpython);
 Datum
 ltree_to_plpython(PG_FUNCTION_ARGS)
 {
-	ltree	   *in = PG_GETARG_LTREE(0);
+	ltree	   *in = PG_GETARG_LTREE_P(0);
 	int			i;
 	PyObject   *list;
 	ltree_level *curlevel;

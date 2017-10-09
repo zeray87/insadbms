@@ -5,7 +5,7 @@
  *	  clients and standalone backends are supported here).
  *
  *
- * Portions Copyright (c) 1996-2016, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2017, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * IDENTIFICATION
@@ -135,9 +135,7 @@ printtup_startup(DestReceiver *self, int operation, TupleDesc typeinfo)
 	 */
 	myState->tmpcontext = AllocSetContextCreate(CurrentMemoryContext,
 												"printtup",
-												ALLOCSET_DEFAULT_MINSIZE,
-												ALLOCSET_DEFAULT_INITSIZE,
-												ALLOCSET_DEFAULT_MAXSIZE);
+												ALLOCSET_DEFAULT_SIZES);
 
 	if (PG_PROTOCOL_MAJOR(FrontendProtocol) < 3)
 	{
@@ -189,7 +187,6 @@ printtup_startup(DestReceiver *self, int operation, TupleDesc typeinfo)
 void
 SendRowDescriptionMessage(TupleDesc typeinfo, List *targetlist, int16 *formats)
 {
-	Form_pg_attribute *attrs = typeinfo->attrs;
 	int			natts = typeinfo->natts;
 	int			proto = PG_PROTOCOL_MAJOR(FrontendProtocol);
 	int			i;
@@ -201,10 +198,11 @@ SendRowDescriptionMessage(TupleDesc typeinfo, List *targetlist, int16 *formats)
 
 	for (i = 0; i < natts; ++i)
 	{
-		Oid			atttypid = attrs[i]->atttypid;
-		int32		atttypmod = attrs[i]->atttypmod;
+		Form_pg_attribute att = TupleDescAttr(typeinfo, i);
+		Oid			atttypid = att->atttypid;
+		int32		atttypmod = att->atttypmod;
 
-		pq_sendstring(&buf, NameStr(attrs[i]->attname));
+		pq_sendstring(&buf, NameStr(att->attname));
 		/* column ID info appears in protocol 3.0 and up */
 		if (proto >= 3)
 		{
@@ -230,10 +228,8 @@ SendRowDescriptionMessage(TupleDesc typeinfo, List *targetlist, int16 *formats)
 		/* If column is a domain, send the base type and typmod instead */
 		atttypid = getBaseTypeAndTypmod(atttypid, &atttypmod);
 		pq_sendint(&buf, (int) atttypid, sizeof(atttypid));
-		pq_sendint(&buf, attrs[i]->attlen, sizeof(attrs[i]->attlen));
-		/* typmod appears in protocol 2.0 and up */
-		if (proto >= 2)
-			pq_sendint(&buf, atttypmod, sizeof(atttypmod));
+		pq_sendint(&buf, att->attlen, sizeof(att->attlen));
+		pq_sendint(&buf, atttypmod, sizeof(atttypmod));
 		/* format info appears in protocol 3.0 and up */
 		if (proto >= 3)
 		{
@@ -272,18 +268,19 @@ printtup_prepare_info(DR_printtup *myState, TupleDesc typeinfo, int numAttrs)
 	{
 		PrinttupAttrInfo *thisState = myState->myinfo + i;
 		int16		format = (formats ? formats[i] : 0);
+		Form_pg_attribute attr = TupleDescAttr(typeinfo, i);
 
 		thisState->format = format;
 		if (format == 0)
 		{
-			getTypeOutputInfo(typeinfo->attrs[i]->atttypid,
+			getTypeOutputInfo(attr->atttypid,
 							  &thisState->typoutput,
 							  &thisState->typisvarlena);
 			fmgr_info(thisState->typoutput, &thisState->finfo);
 		}
 		else if (format == 1)
 		{
-			getTypeBinaryOutputInfo(typeinfo->attrs[i]->atttypid,
+			getTypeBinaryOutputInfo(attr->atttypid,
 									&thisState->typsend,
 									&thisState->typisvarlena);
 			fmgr_info(thisState->typsend, &thisState->finfo);
@@ -517,14 +514,13 @@ void
 debugStartup(DestReceiver *self, int operation, TupleDesc typeinfo)
 {
 	int			natts = typeinfo->natts;
-	Form_pg_attribute *attinfo = typeinfo->attrs;
 	int			i;
 
 	/*
 	 * show the return type of the tuples
 	 */
 	for (i = 0; i < natts; ++i)
-		printatt((unsigned) i + 1, attinfo[i], NULL);
+		printatt((unsigned) i + 1, TupleDescAttr(typeinfo, i), NULL);
 	printf("\t----\n");
 }
 
@@ -549,12 +545,12 @@ debugtup(TupleTableSlot *slot, DestReceiver *self)
 		attr = slot_getattr(slot, i + 1, &isnull);
 		if (isnull)
 			continue;
-		getTypeOutputInfo(typeinfo->attrs[i]->atttypid,
+		getTypeOutputInfo(TupleDescAttr(typeinfo, i)->atttypid,
 						  &typoutput, &typisvarlena);
 
 		value = OidOutputFunctionCall(typoutput, attr);
 
-		printatt((unsigned) i + 1, typeinfo->attrs[i], value);
+		printatt((unsigned) i + 1, TupleDescAttr(typeinfo, i), value);
 	}
 	printf("\t----\n");
 

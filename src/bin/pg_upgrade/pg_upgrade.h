@@ -1,7 +1,7 @@
 /*
  *	pg_upgrade.h
  *
- *	Copyright (c) 2010-2016, PostgreSQL Global Development Group
+ *	Copyright (c) 2010-2017, PostgreSQL Global Development Group
  *	src/bin/pg_upgrade/pg_upgrade.h
  */
 
@@ -94,15 +94,13 @@ extern char *output_files[];
 #define ECHO_BLANK	"."
 #endif
 
-#define CLUSTER_NAME(cluster)	((cluster) == &old_cluster ? "old" : \
-								 (cluster) == &new_cluster ? "new" : "none")
 
-#define atooid(x)  ((Oid) strtoul((x), NULL, 10))
-
-/* OID system catalog preservation added during PG 9.0 development */
-#define TABLE_SPACE_SUBDIRS_CAT_VER 201001111
-/* postmaster/postgres -b (binary_upgrade) flag added during PG 9.1 development */
+/*
+ * postmaster/postgres -b (binary_upgrade) flag added during PG 9.1
+ * development
+ */
 #define BINARY_UPGRADE_SERVER_FLAG_CAT_VER 201104251
+
 /*
  *	Visibility map changed with this 9.2 commit,
  *	8f9fe6edce358f7904e0db119416b4d1080a83aa; pick later catalog version.
@@ -113,6 +111,7 @@ extern char *output_files[];
  * The format of visibility map is changed with this 9.6 commit,
  */
 #define VISIBILITY_MAP_FROZEN_BIT_CAT_VER 201603011
+
 /*
  * pg_multixact format changed in 9.3 commit 0ac5ad5134f2769ccbaefec73844f85,
  * ("Improve concurrency of foreign key locking") which also updated catalog
@@ -131,6 +130,7 @@ extern char *output_files[];
  * change in JSONB format during 9.4 beta
  */
 #define JSONB_FORMAT_CHANGE_CAT_VER 201409291
+
 
 /*
  * Each relation is represented by a relinfo structure.
@@ -185,8 +185,8 @@ typedef struct
 {
 	Oid			db_oid;			/* oid of the database */
 	char	   *db_name;		/* database name */
-	char		db_tablespace[MAXPGPATH];		/* database default tablespace
-												 * path */
+	char		db_tablespace[MAXPGPATH];	/* database default tablespace
+											 * path */
 	char	   *db_collate;
 	char	   *db_ctype;
 	int			db_encoding;
@@ -274,7 +274,7 @@ typedef struct
 	uint32		major_version;	/* PG_VERSION of cluster */
 	char		major_version_str[64];	/* string PG_VERSION of cluster */
 	uint32		bin_version;	/* version returned from pg_ctl */
-	const char *tablespace_suffix;		/* directory specification */
+	const char *tablespace_suffix;	/* directory specification */
 } ClusterInfo;
 
 
@@ -334,7 +334,7 @@ void		output_check_banner(bool live_check);
 void		check_and_dump_old_cluster(bool live_check);
 void		check_new_cluster(void);
 void		report_clusters_compatible(void);
-void		issue_warnings(void);
+void		issue_warnings_and_set_wal_level(void);
 void output_completion_banner(char *analyze_script_file_name,
 						 char *deletion_script_file_name);
 void		check_cluster_versions(void);
@@ -367,10 +367,12 @@ bool		pid_lock_file_exists(const char *datadir);
 
 /* file.c */
 
-const char *copyFile(const char *src, const char *dst);
-const char *linkFile(const char *src, const char *dst);
-const char *rewriteVisibilityMap(const char *fromfile, const char *tofile);
-
+void copyFile(const char *src, const char *dst,
+		 const char *schemaName, const char *relName);
+void linkFile(const char *src, const char *dst,
+		 const char *schemaName, const char *relName);
+void rewriteVisibilityMap(const char *fromfile, const char *tofile,
+					 const char *schemaName, const char *relName);
 void		check_hard_link(void);
 FILE	   *fopen_priv(const char *path, const char *mode);
 
@@ -397,9 +399,9 @@ void		get_sock_dir(ClusterInfo *cluster, bool live_check);
 /* relfilenode.c */
 
 void transfer_all_new_tablespaces(DbInfoArr *old_db_arr,
-				  DbInfoArr *new_db_arr, char *old_pgdata, char *new_pgdata);
+							 DbInfoArr *new_db_arr, char *old_pgdata, char *new_pgdata);
 void transfer_all_new_dbs(DbInfoArr *old_db_arr,
-				   DbInfoArr *new_db_arr, char *old_pgdata, char *new_pgdata,
+					 DbInfoArr *new_db_arr, char *old_pgdata, char *new_pgdata,
 					 char *old_tablespace);
 
 /* tablespace.c */
@@ -431,7 +433,6 @@ void		pg_fatal(const char *fmt,...) pg_attribute_printf(1, 2) pg_attribute_noret
 void		end_progress_output(void);
 void		prep_status(const char *fmt,...) pg_attribute_printf(1, 2);
 void		check_ok(void);
-const char *getErrorText(void);
 unsigned int str2uint(const char *str);
 void		pg_putenv(const char *var, const char *val);
 
@@ -441,6 +442,9 @@ void		pg_putenv(const char *var, const char *val);
 void new_9_0_populate_pg_largeobject_metadata(ClusterInfo *cluster,
 										 bool check_mode);
 void		old_9_3_check_for_line_data_type_usage(ClusterInfo *cluster);
+void		old_9_6_check_for_unknown_data_type_usage(ClusterInfo *cluster);
+void old_9_6_invalidate_hash_indexes(ClusterInfo *cluster,
+								bool check_mode);
 
 /* parallel.c */
 void parallel_exec_prog(const char *log_file, const char *opt_log_file,
